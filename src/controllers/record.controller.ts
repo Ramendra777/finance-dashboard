@@ -35,11 +35,12 @@ export const createRecord = async (req: AuthRequest, res: Response): Promise<voi
 
 export const getRecords = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { type, category, startDate, endDate } = req.query as {
+    const { type, category, startDate, endDate, search } = req.query as {
       type?: string;
       category?: string;
       startDate?: string;
       endDate?: string;
+      search?: string;
     };
 
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -53,6 +54,12 @@ export const getRecords = async (req: AuthRequest, res: Response): Promise<void>
       whereClause.date = {};
       if (startDate) whereClause.date.gte = new Date(startDate);
       if (endDate) whereClause.date.lte = new Date(endDate);
+    }
+    if (search) {
+      whereClause.OR = [
+        { category: { contains: search } },
+        { notes: { contains: search } },
+      ];
     }
 
     const [records, totalCount] = await Promise.all([

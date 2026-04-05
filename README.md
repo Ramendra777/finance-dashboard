@@ -10,6 +10,9 @@ A Node.js backend built with Express, TypeScript, Prisma ORM, and SQLite — des
 - **Filtering & Pagination**: Query records by type, category, and date range with page/limit controls.
 - **Dashboard Analytics**: Aggregated summaries, category breakdowns, recent activity, and monthly trends.
 - **Soft Delete**: Records are marked as deleted rather than permanently removed.
+- **Search Support**: Full-text search across categories and notes.
+- **Rate Limiting**: Protection against brute-force attacks and abuse.
+- **Test Suite**: Comprehensive automated integration tests using Jest and Supertest.
 - **Seed Script**: Pre-populates the database with realistic demo data for evaluation.
 
 ## RBAC Matrix
@@ -71,6 +74,7 @@ Plus 14 financial records spanning January–April 2026 across categories like S
 | `npm run build` | Compile TypeScript |
 | `npm start` | Run compiled output |
 | `npm run seed` | Populate demo data |
+| `npm run test` | Run automated test suite |
 
 ## API Endpoints
 
@@ -106,6 +110,7 @@ Base URL: `http://localhost:3000/api`
 - `type` — Filter by `INCOME` or `EXPENSE`
 - `category` — Filter by category name
 - `startDate` / `endDate` — ISO date range filter
+- `search` — Full-text search across categories and notes
 - `page` — Page number (default: 1)
 - `limit` — Records per page (default: 20, max: 100)
 
