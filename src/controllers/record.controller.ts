@@ -1,13 +1,14 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { prisma } from '../db';
-import { z } from 'zod';
+import { formatZodError, isPrismaNotFound } from '../utils/errors';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { z } from 'zod';
 
 const recordSchema = z.object({
   amount: z.number().positive(),
   type: z.enum(['INCOME', 'EXPENSE']),
   category: z.string().min(1),
-  date: z.string().datetime(), // ISO 8601 string
+  date: z.string().datetime(),
   notes: z.string().optional(),
 });
 
@@ -16,19 +17,16 @@ const partialRecordSchema = recordSchema.partial();
 export const createRecord = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = recordSchema.parse(req.body);
-    const userId = req.user!.id; // from auth middleware
+    const userId = req.user!.id;
 
     const record = await prisma.record.create({
-      data: {
-        ...data,
-        userId,
-      },
+      data: { ...data, userId },
     });
 
     res.status(201).json({ message: 'Record created successfully', record });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: (error as any).errors });
+      res.status(400).json({ error: 'Validation failed', details: formatZodError(error) });
     } else {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -44,7 +42,11 @@ export const getRecords = async (req: AuthRequest, res: Response): Promise<void>
       endDate?: string;
     };
 
-    const whereClause: any = {};
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+    const skip = (page - 1) * limit;
+
+    const whereClause: any = { isDeleted: false };
     if (type) whereClause.type = type;
     if (category) whereClause.category = category;
     if (startDate || endDate) {
@@ -53,13 +55,26 @@ export const getRecords = async (req: AuthRequest, res: Response): Promise<void>
       if (endDate) whereClause.date.lte = new Date(endDate);
     }
 
-    const records = await prisma.record.findMany({
-      where: whereClause,
-      orderBy: { date: 'desc' },
-      include: { user: { select: { id: true, email: true } } }
-    });
+    const [records, totalCount] = await Promise.all([
+      prisma.record.findMany({
+        where: whereClause,
+        orderBy: { date: 'desc' },
+        skip,
+        take: limit,
+        include: { user: { select: { id: true, email: true } } },
+      }),
+      prisma.record.count({ where: whereClause }),
+    ]);
 
-    res.json({ records });
+    res.json({
+      records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+      },
+    });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -68,9 +83,9 @@ export const getRecords = async (req: AuthRequest, res: Response): Promise<void>
 export const getRecordById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const record = await prisma.record.findUnique({
-      where: { id },
-      include: { user: { select: { id: true, email: true } } }
+    const record = await prisma.record.findFirst({
+      where: { id, isDeleted: false },
+      include: { user: { select: { id: true, email: true } } },
     });
 
     if (!record) {
@@ -89,6 +104,12 @@ export const updateRecord = async (req: AuthRequest, res: Response): Promise<voi
     const id = req.params.id as string;
     const data = partialRecordSchema.parse(req.body);
 
+    const existing = await prisma.record.findFirst({ where: { id, isDeleted: false } });
+    if (!existing) {
+      res.status(404).json({ error: 'Record not found' });
+      return;
+    }
+
     const record = await prisma.record.update({
       where: { id },
       data,
@@ -96,9 +117,10 @@ export const updateRecord = async (req: AuthRequest, res: Response): Promise<voi
 
     res.json({ message: 'Record updated successfully', record });
   } catch (error) {
-    // Handling Prisma not found error gracefully would use error.code === 'P2025'
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: (error as any).errors });
+      res.status(400).json({ error: 'Validation failed', details: formatZodError(error) });
+    } else if (isPrismaNotFound(error)) {
+      res.status(404).json({ error: 'Record not found' });
     } else {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -108,12 +130,24 @@ export const updateRecord = async (req: AuthRequest, res: Response): Promise<voi
 export const deleteRecord = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
-    await prisma.record.delete({
+
+    const existing = await prisma.record.findFirst({ where: { id, isDeleted: false } });
+    if (!existing) {
+      res.status(404).json({ error: 'Record not found' });
+      return;
+    }
+
+    await prisma.record.update({
       where: { id },
+      data: { isDeleted: true },
     });
 
     res.json({ message: 'Record deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    if (isPrismaNotFound(error)) {
+      res.status(404).json({ error: 'Record not found' });
+    } else {
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 };
